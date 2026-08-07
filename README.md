@@ -2,6 +2,8 @@
 
 A [Herdr](https://herdr.dev) plugin that stops your restored session growing forever.
 
+Development happens on [GitHub](https://github.com/Gareth-Rouse/herdr-plugin-session-pruner); [GitLab](https://gitlab.com/Gareth-Rouse/herdr-plugin-session-pruner) is a read-only mirror with issues and merge requests disabled.
+
 Herdr restores every workspace in `session.json` on start: each pane gets a fresh shell and, with `session.resume_agents_on_restore`, a resumed agent.
 A month of one-off workspaces therefore comes back every single time.
 
