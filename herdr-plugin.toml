@@ -1,0 +1,50 @@
+id = "garethrouse.session-pruner"
+name = "Session Pruner"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Track workspace last-use, show the age in the Spaces sidebar, and keep cold workspaces out of the restored session"
+platforms = ["linux", "macos"]
+
+# Adopt workspaces the ledger has never seen, forget dead ones, paint labels,
+# and -- in live mode -- close workspaces that are past their TTL.
+[[startup]]
+command = ["bash", "sessionPruner.sh", "startup"]
+
+# "Used" means focused. Agent output in a background workspace deliberately
+# does not count: pane.agent_status_changed would spawn a hook process every
+# few seconds per agent. Busy agents are instead protected at prune time.
+[[events]]
+on = "workspace.focused"
+command = ["bash", "sessionPruner.sh", "touch"]
+
+[[events]]
+on = "workspace.created"
+command = ["bash", "sessionPruner.sh", "touch"]
+
+[[events]]
+on = "pane.focused"
+command = ["bash", "sessionPruner.sh", "touch"]
+
+[[events]]
+on = "workspace.closed"
+command = ["bash", "sessionPruner.sh", "sync"]
+
+[[actions]]
+id = "toggle-pin"
+title = "Session Pruner: pin/unpin this workspace"
+contexts = ["workspace"]
+command = ["bash", "sessionPruner.sh", "toggle-pin"]
+
+[[actions]]
+id = "prune-now"
+title = "Session Pruner: prune cold workspaces now"
+contexts = ["workspace"]
+command = ["bash", "sessionPruner.sh", "prune-live"]
+
+[[panes]]
+id = "status"
+title = "Session Pruner status"
+placement = "popup"
+width = "70%"
+height = 20
+command = ["bash", "sessionPruner.sh", "report"]
