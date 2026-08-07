@@ -113,6 +113,11 @@ isTrue() {
   case "${1:-}" in 1 | true | yes | on) return 0 ;; *) return 1 ;; esac
 }
 
+# A jq --argjson literal for a config flag.
+boolJson() {
+  if isTrue "${1:-}"; then printf 'true'; else printf 'false'; fi
+}
+
 log() {
   # Plugin command output is captured in `herdr plugin log`.
   echo "session-pruner: $*" >&2
@@ -360,7 +365,7 @@ pruneLive() {
     $(prunePlanArgs) \
     --arg protect "$SESSION_PRUNER_PROTECT" \
     --argjson pins "$(readPins)" \
-    --argjson protectBusy "$(isTrue "$SESSION_PRUNER_PROTECT_BUSY_AGENTS" && echo true || echo false)")"
+    --argjson protectBusy "$(boolJson "$SESSION_PRUNER_PROTECT_BUSY_AGENTS")")"
 
   ids="$(printf '%s' "$drops" | jq -r '.[] | .id')"
   [ -n "$ids" ] || return 0
@@ -481,11 +486,11 @@ togglePin() {
 }
 
 report() {
-  local items
+  local items dryNote=""
+  if isTrue "$SESSION_PRUNER_DRY_RUN"; then dryNote="  (dry run)"; fi
   printf 'Session Pruner  mode=%s  ttl=%sh  keep_max=%s  keep_min=%s%s\n\n' \
     "$SESSION_PRUNER_MODE" "$SESSION_PRUNER_TTL_HOURS" \
-    "$SESSION_PRUNER_KEEP_MAX" "$SESSION_PRUNER_KEEP_MIN" \
-    "$(isTrue "$SESSION_PRUNER_DRY_RUN" && echo '  (dry run)' || true)"
+    "$SESSION_PRUNER_KEEP_MAX" "$SESSION_PRUNER_KEEP_MIN" "$dryNote"
 
   if ! items="$(liveWorkspaces)"; then
     echo "no running Herdr server"
@@ -515,7 +520,7 @@ report() {
       $(prunePlanArgs) \
       --arg protect "$SESSION_PRUNER_PROTECT" \
       --argjson pins "$(readPins)" \
-      --argjson protectBusy "$(isTrue "$SESSION_PRUNER_PROTECT_BUSY_AGENTS" && echo true || echo false)" |
+      --argjson protectBusy "$(boolJson "$SESSION_PRUNER_PROTECT_BUSY_AGENTS")" |
       awk -F'\t' '{ printf "%-6s %-24s %-10s %-10s %s\n", $1, $2, $3, $4, $5 }'
   fi
 

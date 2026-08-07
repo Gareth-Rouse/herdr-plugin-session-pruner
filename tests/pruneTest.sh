@@ -281,8 +281,14 @@ makeStub "$box"
   export STUB_SERVER=running
   STUB_WORKSPACES="$(liveWorkspaces)" run "$box" prune-live 2>/dev/null
 )
-assertEq "live dry run closes nothing" "0" \
-  "$([ -f "$box/closed" ] && wc -l <"$box/closed" | tr -d ' ' || echo 0)"
+closedCount() {
+  if [ -f "$1/closed" ]; then
+    wc -l <"$1/closed" | tr -d ' '
+  else
+    echo 0
+  fi
+}
+assertEq "live dry run closes nothing" "0" "$(closedCount "$box")"
 rm -rf "$box"
 
 # --------------------------------------------------------------------------

@@ -8,11 +8,18 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        # macOS matters: the runner's /bin/bash is 3.2 and has no flock(1), so
+        # this is the real portability gate, not just a second Linux.
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: shellcheck
+        # Preinstalled on the Ubuntu image only.
+        if: runner.os == 'Linux'
         run: shellcheck sessionPruner.sh tests/pruneTest.sh
+      - name: bash version
+        run: bash --version | head -1
       - name: tests
         run: bash tests/pruneTest.sh
