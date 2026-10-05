@@ -11,6 +11,9 @@
 # Subcommands:
 #   startup       [[startup]] hook: adopt, prune (live mode), paint labels
 #   touch         stamp the current workspace as used now, then refresh labels
+#   focus         focus hook: stamp the workspace once it has kept focus for
+#                 SESSION_PRUNER_DWELL_SECONDS (a sweep or a peek is not use)
+#   confirm-focus internal: the delayed half of `focus`
 #   sync          adopt unknown workspaces, forget dead ones, refresh labels
 #   refresh       rewrite the sidebar token on every live workspace
 #   prune-live    close cold workspaces through the running server
@@ -82,6 +85,10 @@ loadConfig
 : "${SESSION_PRUNER_MODE:=live}"
 # Workspaces untouched for longer than this are cold. 0 disables age pruning.
 : "${SESSION_PRUNER_TTL_HOURS:=24}"
+# A focus only counts as use once the workspace has kept it this long. Sweeping
+# through workspaces (a held next-workspace key, clicking down the sidebar) or
+# a quick peek therefore resets nothing. 0 = every focus counts at once.
+: "${SESSION_PRUNER_DWELL_SECONDS:=60}"
 # Keep at most N workspaces, oldest-used dropped first. 0 = unlimited.
 : "${SESSION_PRUNER_KEEP_MAX:=0}"
 # Never prune below this many workspaces, however cold they are.
@@ -107,6 +114,7 @@ historyFile="${sessionFile%.json}-history.json"
 ledgerFile="$SESSION_PRUNER_LEDGER"
 pinsFile="$SESSION_PRUNER_PINS"
 labelCacheFile="$stateDir/labels.json"
+pendingFile="$stateDir/pendingFocus.json"
 lockFile="$stateDir/lock"
 
 isTrue() {
@@ -305,15 +313,72 @@ EOF
 # Ledger maintenance
 # --------------------------------------------------------------------------
 
+# Caller holds the lock.
+stampWorkspace() {
+  readLedger |
+    jq --arg id "$1" --argjson now "$(date +%s)" '.[$id] = $now' |
+    writeAtomic "$ledgerFile"
+}
+
 touchWorkspace() {
   local id="${1:-${HERDR_WORKSPACE_ID:-}}"
   if [ -n "$id" ]; then
     lock
-    readLedger |
-      jq --arg id "$id" --argjson now "$(date +%s)" '.[$id] = $now' |
-      writeAtomic "$ledgerFile"
+    stampWorkspace "$id"
     unlock
   fi
+  refresh
+}
+
+# Focus hooks fire for every workspace a sweep passes through, so a focus is
+# only a candidate: record it, and let a detached timer stamp it if the same
+# focus is still current after the dwell. Any later focus of another workspace
+# replaces the candidate, which voids the earlier timer.
+focusWorkspace() {
+  local id="${1:-${HERDR_WORKSPACE_ID:-}}" dwell="$SESSION_PRUNER_DWELL_SECONDS" now token pending
+  [ -n "$id" ] || return 0
+  case "$dwell" in '' | *[!0-9]*) dwell=0 ;; esac
+  if [ "$dwell" -eq 0 ]; then
+    touchWorkspace "$id"
+    return
+  fi
+  now="$(date +%s)"
+  lock
+  # Moving between panes of the candidate workspace keeps its timer running.
+  # A candidate older than its timer is stale (the timer died with the server).
+  pending="$(readJson "$pendingFile" '{}' |
+    jq -r --argjson now "$now" --argjson dwell "$dwell" '
+      if (.at // 0) + $dwell + 30 > $now then (.id // "") else "" end')"
+  if [ "$pending" = "$id" ]; then
+    unlock
+    return 0
+  fi
+  token="$now.$$.$RANDOM"
+  jq -n --arg id "$id" --arg token "$token" --argjson at "$now" \
+    '{id: $id, token: $token, at: $at}' | writeAtomic "$pendingFile"
+  unlock
+  # Herdr waits for the hook process, so the timer must not hold its pipes,
+  # and setsid keeps it alive if Herdr reaps the hook's process group.
+  local detach=()
+  if command -v setsid >/dev/null 2>&1; then detach=(setsid); fi
+  # shellcheck disable=SC2016  # positional args of the inner shell
+  ${detach[@]+"${detach[@]}"} "${BASH:-bash}" -c 'sleep "$1" && exec "${BASH:-bash}" "$2" confirm-focus "$3" "$4"' \
+    _ "$dwell" "$0" "$id" "$token" </dev/null >/dev/null 2>&1 9>&- &
+}
+
+confirmFocus() {
+  local id="$1" token="$2" current focused
+  lock
+  current="$(readJson "$pendingFile" '{}' | jq -r '"\(.id // "")/\(.token // "")"')"
+  if [ "$current" != "$id/$token" ]; then
+    unlock
+    return 0
+  fi
+  focused="$("$herdrBin" workspace list 2>/dev/null |
+    jq -r '[(.result.workspaces // [])[] | select(.focused) | .workspace_id][0] // ""' 2>/dev/null)" || focused=""
+  [ "$focused" != "$id" ] || stampWorkspace "$id"
+  rm -f "$pendingFile"
+  unlock
   refresh
 }
 
@@ -533,7 +598,7 @@ report() {
 
 showConfig() {
   local v
-  for v in MODE TTL_HOURS KEEP_MAX KEEP_MIN PROTECT PROTECT_BUSY_AGENTS \
+  for v in MODE TTL_HOURS DWELL_SECONDS KEEP_MAX KEEP_MIN PROTECT PROTECT_BUSY_AGENTS \
     LABELS LABEL_TOKEN PINNED_LABEL DRY_RUN SESSION_FILE LEDGER PINS; do
     eval "printf '%s=%s\n' \"SESSION_PRUNER_$v\" \"\${SESSION_PRUNER_$v}\""
   done
@@ -556,6 +621,8 @@ usage() {
 case "${1:-}" in
 startup) startup ;;
 touch) touchWorkspace "${2:-}" ;;
+focus) focusWorkspace "${2:-}" ;;
+confirm-focus) confirmFocus "${2:?workspace id}" "${3:?token}" ;;
 sync) syncWorkspaces ;;
 refresh) refresh ;;
 prune-live) pruneLive ;;

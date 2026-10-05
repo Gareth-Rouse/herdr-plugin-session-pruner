@@ -1,6 +1,6 @@
 id = "garethrouse.session-pruner"
 name = "Session Pruner"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.7.0"
 description = "Track workspace last-use, show the age in the Spaces sidebar, and keep cold workspaces out of the restored session"
 platforms = ["linux", "macos"]
@@ -10,12 +10,14 @@ platforms = ["linux", "macos"]
 [[startup]]
 command = ["bash", "sessionPruner.sh", "startup"]
 
-# "Used" means focused. Agent output in a background workspace deliberately
-# does not count: pane.agent_status_changed would spawn a hook process every
-# few seconds per agent. Busy agents are instead protected at prune time.
+# "Used" means focused for SESSION_PRUNER_DWELL_SECONDS (`focus` arms a timer;
+# a sweep through workspaces stamps nothing), or created. Agent output in a
+# background workspace deliberately does not count: pane.agent_status_changed
+# would spawn a hook process every few seconds per agent. Busy agents are
+# instead protected at prune time.
 [[events]]
 on = "workspace.focused"
-command = ["bash", "sessionPruner.sh", "touch"]
+command = ["bash", "sessionPruner.sh", "focus"]
 
 [[events]]
 on = "workspace.created"
@@ -23,7 +25,7 @@ command = ["bash", "sessionPruner.sh", "touch"]
 
 [[events]]
 on = "pane.focused"
-command = ["bash", "sessionPruner.sh", "touch"]
+command = ["bash", "sessionPruner.sh", "focus"]
 
 [[events]]
 on = "workspace.closed"

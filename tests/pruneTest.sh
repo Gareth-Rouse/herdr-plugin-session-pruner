@@ -292,6 +292,55 @@ assertEq "live dry run closes nothing" "0" "$(closedCount "$box")"
 rm -rf "$box"
 
 # --------------------------------------------------------------------------
+# Focus dwell
+# --------------------------------------------------------------------------
+
+echo "focus dwell"
+
+# w1 (100h) and w3 (48h) are both cold; w3 ends up focused.
+focusedOn() {
+  jq -n --arg f "$1" '{ result: { workspaces: [
+    { workspace_id: "w1", label: "alpha", agent_status: "idle", focused: ($f == "w1") },
+    { workspace_id: "w3", label: "ops",   agent_status: "idle", focused: ($f == "w3") }
+  ] } }'
+}
+ageOf() { jq -r --arg id "$2" --argjson now "$(date +%s)" '$now - .[$id]' "$1/state/lastUsed.json"; }
+
+box="$(newBox)"
+makeStub "$box"
+(
+  export SESSION_PRUNER_DWELL_SECONDS=1 SESSION_PRUNER_LABELS=0 STUB_SERVER=running
+  STUB_WORKSPACES="$(focusedOn w3)"
+  export STUB_WORKSPACES
+  run "$box" focus w1
+  run "$box" focus w3
+)
+assertEq "focus does not stamp before the dwell" "true" "$(jq "$(ageOf "$box" w3) > 3600" -n)"
+sleep 2
+assertEq "a swept-past workspace is never stamped" "true" "$(jq "$(ageOf "$box" w1) > 3600" -n)"
+assertEq "the workspace that kept focus is stamped" "true" "$(jq "$(ageOf "$box" w3) < 5" -n)"
+rm -rf "$box"
+
+box="$(newBox)"
+makeStub "$box"
+(
+  export SESSION_PRUNER_DWELL_SECONDS=1 SESSION_PRUNER_LABELS=0 STUB_SERVER=running
+  STUB_WORKSPACES="$(focusedOn w3)" run "$box" focus w1
+)
+sleep 2
+assertEq "focus that moved on without an event is not stamped" "true" "$(jq "$(ageOf "$box" w1) > 3600" -n)"
+rm -rf "$box"
+
+box="$(newBox)"
+makeStub "$box"
+(
+  export SESSION_PRUNER_DWELL_SECONDS=0 SESSION_PRUNER_LABELS=0 STUB_SERVER=running
+  STUB_WORKSPACES="$(focusedOn w1)" run "$box" focus w1
+)
+assertEq "dwell 0 stamps immediately" "true" "$(jq "$(ageOf "$box" w1) < 5" -n)"
+rm -rf "$box"
+
+# --------------------------------------------------------------------------
 # Labels, pins, config
 # --------------------------------------------------------------------------
 

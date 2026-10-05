@@ -24,7 +24,7 @@ herdr plugin install Gareth-Rouse/herdr-plugin-session-pruner
 
 Requires `bash` and `jq` on `PATH`. `flock` is used when present; without it (macOS) the plugin falls back to a `mkdir` lock.
 
-Nothing is pruned until a workspace has gone `SESSION_PRUNER_TTL_HOURS` (default 24) without being focused, and the active workspace, busy agents and pinned workspaces are never pruned.
+Nothing is pruned until a workspace has gone `SESSION_PRUNER_TTL_HOURS` (default 24) without being used, and the active workspace, busy agents and pinned workspaces are never pruned.
 Set `SESSION_PRUNER_MODE=off` first if you would rather watch the ages for a few days before letting it remove anything.
 
 ## Configuration
@@ -41,7 +41,8 @@ Real environment variables override the file, so a launcher wrapper or a Nix mod
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `SESSION_PRUNER_MODE` | `live` | `live` closes cold workspaces from the startup hook. `snapshot` edits `session.json` before the server starts (see below). `off` only tracks and labels. |
-| `SESSION_PRUNER_TTL_HOURS` | `24` | A workspace is cold after this long without focus. `0` disables age-based pruning. |
+| `SESSION_PRUNER_TTL_HOURS` | `24` | A workspace is cold after this long without use. `0` disables age-based pruning. |
+| `SESSION_PRUNER_DWELL_SECONDS` | `60` | A focus only counts as use once the workspace has kept it this long. `0` counts every focus immediately. |
 | `SESSION_PRUNER_KEEP_MAX` | `0` | Keep at most this many workspaces, oldest-used dropped first. `0` is unlimited. |
 | `SESSION_PRUNER_KEEP_MIN` | `1` | Never prune below this many workspaces, however cold they are. |
 | `SESSION_PRUNER_PROTECT` | empty | Extended regex. A matching workspace is never pruned; matched against the workspace label (live) or `custom_name`, falling back to `identity_cwd` (snapshot). |
@@ -139,7 +140,9 @@ pkgs.symlinkJoin {
 
 ## How "used" is decided
 
-A workspace is stamped as used when it, or one of its panes, is focused.
+A workspace is stamped as used when it, or one of its panes, keeps focus for `SESSION_PRUNER_DWELL_SECONDS` (default 60), and when it is created.
+Focus that moves on sooner does not count, so sweeping through workspaces with a held key, clicking down the sidebar, or peeking at one leaves every age alone.
+Restoring a session does not count either: a restore emits no focus events, and only the workspace you then stay on gets stamped.
 Background agent output deliberately does not count: hooking `pane.agent_status_changed` would spawn a process every few seconds per agent.
 Long-running background work is protected at prune time instead, through `SESSION_PRUNER_PROTECT_BUSY_AGENTS` (live mode) and pinning.
 
@@ -152,6 +155,7 @@ Workspaces the ledger has never seen — first run, or created while the plugin 
 ```
 startup       adopt, prune (live mode), paint labels
 touch         stamp the current workspace as used now
+focus         stamp the current workspace once it has kept focus for the dwell
 sync          adopt unknown workspaces, forget dead ones
 refresh       rewrite the sidebar token on every live workspace
 prune-live    close cold workspaces through the running server
